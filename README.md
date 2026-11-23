@@ -21,16 +21,16 @@ A [Claude Code](https://claude.com/claude-code) skill that helps Claude write La
 
 | | Supported |
 |---|---|
-| Laravel | 10, 11, 12, 13 (tested on 13.x) |
-| PHP for the scripts | 8.2+ (Laravel 13 itself needs 8.3+) |
-| Tests | Pest 2–5, PHPUnit 10–12 |
+| Laravel | 10, 11, 12, 13 (tested on 12.x and 13.x) |
+| PHP for the scripts | 8.2+ (tested on 8.2 and 8.4; Laravel 13 itself needs 8.3+) |
+| Tests | Pest 2–5, PHPUnit 10–12 (tested with Pest 3 and 5, PHPUnit 11 and 12) |
 | Model style | Attributes on Laravel 13+, properties on ≤ 12. Override with `--style=attributes\|properties` |
 
 ## Install
 
 ```bash
-git clone git@github.com:bionyxxx/laravel-clean-architecture.git
-ln -s "$PWD/laravel-clean-architecture" ~/.claude/skills/laravel-clean-architecture
+git clone git@github.com:bionyxxx/laravel-clean-architecture-skills.git
+ln -s "$PWD/laravel-clean-architecture-skills" ~/.claude/skills/laravel-clean-architecture
 ```
 
 Claude Code picks it up automatically when you work on Laravel backend code. For a single project, put it in that project's `.claude/skills/` instead.

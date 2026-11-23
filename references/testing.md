@@ -252,7 +252,7 @@ Run it with `vendor/bin/deptrac analyse` (through Sail if present).
 - Without Pest, enforce the architecture with Deptrac. `phpat/phpat` (a PHPStan extension) is another option if Larastan is installed.
 
 ### Laravel 13 notes
-- Laravel 13 ships Pest 4/5 and PHPUnit 12. The generated tests and the `arch()` rules in the level files were verified on Laravel 13 with Pest 5 and PHPUnit 12.
+- Laravel 13 ships Pest 4/5 and PHPUnit 12. The generated tests and the `arch()` rules in the level files were verified on Laravel 13 with Pest 5 and PHPUnit 12, and on Laravel 12 with Pest 3 and PHPUnit 11 (PHP 8.2 and 8.4).
 - The fresh `tests/Pest.php` imports `RefreshDatabase` but leaves `->use(RefreshDatabase::class)` **commented out**. Either enable it for `Feature`, or add `uses(RefreshDatabase::class);` per file (the generator does this automatically when needed).
 - Testing attributes are available: `#[Seed]`, `#[Seeder(...)]`, `#[SetUp]`/`#[TearDown]`, `#[WithoutMigrationEvents]`.
 
