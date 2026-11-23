@@ -84,6 +84,7 @@ Presentation ─► Application ─► Domain
 - Handlers receive Commands built from primitives. They never receive Requests, Eloquent models or Laravel `Data` objects.
 - IDs come from the repository (`nextIdentity()`) or the `IdGenerator` port, never from auto-increment, so entities have identity before they're persisted.
 - Laravel-data, FormRequests and API Resources stay in Presentation. Eloquent, Scout, Cashier and medialibrary stay in Infrastructure.
+- **Laravel 13 attributes** are framework code. They belong only on Infrastructure and Presentation classes (`#[Table]` on `*Model`, `#[Middleware]` on controllers, `#[Tries]` on jobs). Domain entities, ports and handlers carry none, and `#[Bind]` on a port is forbidden. Bind ports in providers.
 
 ## 5. Templates
 
@@ -314,16 +315,17 @@ final class PlaceOrderHandler
 
 namespace App\Modules\Order\Infrastructure\Persistence;
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[Table('orders')]   // Laravel 13+; ≤ 12: protected $table = 'orders'; protected $guarded = [];
+#[Unguarded]         // safe here: only the mapper writes to this model
 final class OrderModel extends Model
 {
     use HasUuids;
-
-    protected $table = 'orders';
-    protected $guarded = [];
 
     protected function casts(): array
     {

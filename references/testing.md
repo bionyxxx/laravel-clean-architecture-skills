@@ -85,7 +85,11 @@ pest()->extend(Tests\TestCase::class)->use(Illuminate\Foundation\Testing\Refresh
 ### Factories for module models (L2/L3)
 Module models aren't in `App\Models`, so wire factories explicitly:
 ```php
-// in the model
+// in the model, Laravel 13+
+#[UseFactory(OrderFactory::class)]
+final class Order extends Model { use HasFactory; }
+
+// Laravel ≤ 12
 protected static function newFactory(): OrderFactory { return OrderFactory::new(); }
 
 // database/factories/Order/OrderFactory.php
@@ -246,6 +250,11 @@ Run it with `vendor/bin/deptrac analyse` (through Sail if present).
 - Exceptions: `$this->expectException(OrderCannotBeCancelled::class);`.
 - Pure unit tests (L4) extend `PHPUnit\Framework\TestCase`, not Laravel's, so the app doesn't boot.
 - Without Pest, enforce the architecture with Deptrac. `phpat/phpat` (a PHPStan extension) is another option if Larastan is installed.
+
+### Laravel 13 notes
+- Laravel 13 ships Pest 4/5 and PHPUnit 12. The generated tests and the `arch()` rules in the level files were verified on Laravel 13 with Pest 5 and PHPUnit 12.
+- The fresh `tests/Pest.php` imports `RefreshDatabase` but leaves `->use(RefreshDatabase::class)` **commented out**. Either enable it for `Feature`, or add `uses(RefreshDatabase::class);` per file (the generator does this automatically when needed).
+- Testing attributes are available: `#[Seed]`, `#[Seeder(...)]`, `#[SetUp]`/`#[TearDown]`, `#[WithoutMigrationEvents]`.
 
 ## 9. Running tests
 

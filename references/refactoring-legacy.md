@@ -76,8 +76,8 @@ public function store(StoreOrderRequest $request, PlaceOrderAction $placeOrder):
 
 1. List business areas (Order, Catalog, Billing, Identity…) and map every model, Action, event, job and listener to exactly one area. Resolve shared ones by choosing an owner. Put truly generic pieces in `Domain/Shared`.
 2. For one area at a time: `git mv app/Actions/Order app/Domain/Order/Actions`, the models to `app/Domain/Order/Models`, and so on. Then update the namespaces and imports.
-3. Add `newFactory()` to the moved models and move their factories to `database/factories/Order/`.
-4. Create `DomainServiceProvider` and move listener registrations and the morph map into it. Policies outside `app/Policies` need `Gate::policy()`.
+3. Wire factories on the moved models with `#[UseFactory(...)]` (Laravel 13+) or `newFactory()`, and move the factories to `database/factories/Order/`.
+4. Create `DomainServiceProvider` and move listener registrations and the morph map into it. Policies outside `app/Policies` need `#[UsePolicy(...)]` on the model (Laravel 13+) or `Gate::policy()`.
 5. Search the codebase for the old class names (`grep -rn 'App\\Models\\Order\b'` plus string references in config, morph maps and serialized jobs). See Pitfalls.
 6. Add the L2 arch rules. Repeat for the next area.
 
@@ -113,8 +113,9 @@ Do this for the **core** modules only. Supporting modules (CMS, settings) may st
 | Queued jobs and serialized models in Redis/DB reference old class names | Drain the queues before deploying, or keep a `class_alias()` shim for one release |
 | Cached and serialized data (cache, sessions, notifications `data`, `failed_jobs`) | Clear the caches. Keep aliases for notification classes stored in `notifications.type` |
 | `config/auth.php` provider model (`App\Models\User`) | Update it, or leave `User` in `App\Models` (a fine pragmatic choice) |
-| Policy auto-discovery expects `App\Models\X` → `App\Policies\XPolicy` | Register with `Gate::policy()` or `Gate::guessPolicyNamesUsing()` |
-| Factories resolved by model name | `newFactory()` on each moved model |
+| Policy auto-discovery expects `App\Models\X` → `App\Policies\XPolicy` | `#[UsePolicy]` on the model (Laravel 13+), or `Gate::policy()` / `Gate::guessPolicyNamesUsing()` |
+| Factories resolved by model name | `#[UseFactory]` (Laravel 13+) or `newFactory()` on each moved model |
+| Mixed styles after a Laravel 13 upgrade (`$fillable` vs `#[Fillable]`) | Don't convert unrelated classes in a move PR. Convert per area in a separate commit (Rector or Boost can help) |
 | Event auto-discovery only scans `app/Listeners` | Register explicitly in providers or configure `withEvents(discover: [...])` |
 | Filament/Nova resources reference model classes and paths | Update `$model` and the panel's `discoverResources()` paths |
 | Broadcast channel names and `broadcastAs()` derived from class names | Set `broadcastAs()` explicitly before moving |

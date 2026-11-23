@@ -99,7 +99,7 @@ If the project already has a level, put it first as "Keep current L2 (Recommende
 
 ## 7. Recording the decision
 
-After the user confirms, offer to append this to the project's `CLAUDE.md`:
+After the user confirms, offer to append this to the project's `CLAUDE.md`. If the file contains a `<laravel-boost-guidelines>` block (the default in new Laravel 13 apps), put the section **after the closing `</laravel-boost-guidelines>` tag**, because Boost regenerates everything inside it:
 
 ```md
 ## Architecture

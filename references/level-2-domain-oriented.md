@@ -48,32 +48,40 @@ These are the same as L1 (Action, Data, Service, Event, Listener, Job), plus:
 
 ## Rules
 
-- Each model lives in exactly one domain. Factories live in `database/factories/{Domain}` and are wired with `newFactory()`.
+- Each model lives in exactly one domain. Factories live in `database/factories/{Domain}` and are wired with `#[UseFactory]` (Laravel 13+) or `newFactory()`.
 - State changes go through Actions that check the enum transition: `$order->status->canTransitionTo(...)`, or `spatie/laravel-model-states`.
 - Cross-domain workflows: domain A dispatches an event, and domain B's listener calls domain B's Action. Don't build an Action that writes to both domains' tables.
 - Register the morph map in `DomainServiceProvider` (`Relation::enforceMorphMap`) so moving classes later doesn't break polymorphic rows.
-- Policies live in `app/Policies` or `Domain/{Domain}/Policies`. Register them explicitly with `Gate::policy()` when they aren't in the default discovery path.
+- Policies live in `app/Policies` or `Domain/{Domain}/Policies`. Wire them with `#[UsePolicy]` on the model (Laravel 13+) or `Gate::policy()` when they aren't in the default discovery path.
 
 ## Templates
 
-### Model with custom builder and factory
+### Model with custom builder, factory and policy (Laravel 13+)
 ```php
 <?php
 
 namespace App\Domain\Order\Models;
 
 use App\Domain\Order\Enums\OrderStatus;
+use App\Domain\Order\Policies\OrderPolicy;
 use App\Domain\Order\QueryBuilders\OrderQueryBuilder;
 use Database\Factories\Order\OrderFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
+use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[Fillable(['customer_id', 'status', 'total', 'cancel_reason'])]
+#[UseFactory(OrderFactory::class)]
+#[UsePolicy(OrderPolicy::class)]
+#[UseEloquentBuilder(OrderQueryBuilder::class)]
 final class Order extends Model
 {
+    /** @use HasFactory<OrderFactory> */
     use HasFactory;
-
-    protected $guarded = [];
 
     protected function casts(): array
     {
@@ -84,18 +92,9 @@ final class Order extends Model
     {
         return $this->hasMany(OrderLine::class);
     }
-
-    public function newEloquentBuilder($query): OrderQueryBuilder
-    {
-        return new OrderQueryBuilder($query);
-    }
-
-    protected static function newFactory(): OrderFactory
-    {
-        return OrderFactory::new();
-    }
 }
 ```
+**Laravel ≤ 12:** use `protected $fillable = [...]`, `protected static function newFactory(): OrderFactory { return OrderFactory::new(); }`, `public function newEloquentBuilder($query): OrderQueryBuilder { return new OrderQueryBuilder($query); }`, and register the policy with `Gate::policy(Order::class, OrderPolicy::class)` in the provider.
 
 ### Enum with transitions
 ```php
@@ -184,12 +183,13 @@ namespace App\Domain\Catalog\Listeners;
 use App\Domain\Catalog\Actions\ReleaseStockAction;
 use App\Domain\Order\Events\OrderCancelled;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\Attributes\Backoff;
+use Illuminate\Queue\Attributes\Tries;
 
+#[Tries(5)]
+#[Backoff(10, 60, 300)]   // Laravel ≤ 12: public int $tries = 5; public array $backoff = [10, 60, 300];
 final class ReleaseStockOnCancellation implements ShouldQueue
 {
-    public int $tries = 5;
-    public array $backoff = [10, 60, 300];
-
     public function __construct(private ReleaseStockAction $releaseStock) {}
 
     public function handle(OrderCancelled $event): void

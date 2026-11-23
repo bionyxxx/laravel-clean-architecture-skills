@@ -15,6 +15,16 @@ A [Claude Code](https://claude.com/claude-code) skill that helps Claude write La
 - **Ecosystem-aware.** It covers Laravel Sail, Spatie packages (laravel-data, permission, query-builder, model-states, …), Sanctum, Horizon, Octane, Cashier, Scout, Reverb, Pennant, Livewire, Inertia, Filament, Nova, laravel-actions, laravel-modules, Pest and Larastan.
 - **Scaffolding.** `scripts/make-module.php` generates a module for the chosen level: model, DTO, action or use case, repository, controller, routes, migration, tests and arch tests. It adapts to the packages it finds (laravel-data, laravel-actions, Pest, Sail).
 - **Guides** for every level, testing (including Pest `arch()` rules and Deptrac), and incremental migration from legacy code.
+- **Laravel 13 ready.** It detects the Laravel version. On 13+ the generated code uses PHP attributes (`#[Table]`, `#[Fillable]`, `#[UseFactory]`, …), and on older versions it uses properties. Layer rules cover the new attributes (for example, no `#[Bind]` on Domain contracts at L3/L4), and decisions are written outside the Laravel Boost block in `CLAUDE.md`.
+
+## Compatibility
+
+| | Supported |
+|---|---|
+| Laravel | 10, 11, 12, 13 (tested on 13.x) |
+| PHP for the scripts | 8.2+ (Laravel 13 itself needs 8.3+) |
+| Tests | Pest 2–5, PHPUnit 10–12 |
+| Model style | Attributes on Laravel 13+, properties on ≤ 12. Override with `--style=attributes\|properties` |
 
 ## Install
 
@@ -75,7 +85,7 @@ Requires PHP 8.2+ and no other dependencies. Run them from the Laravel project r
 php ~/.claude/skills/laravel-clean-architecture/scripts/analyze-project.php [project-root] [--json]
 
 php ~/.claude/skills/laravel-clean-architecture/scripts/make-module.php Order --level=3 \
-    [--entity=Order] [--usecase=PlaceOrder] [--register] [--dry-run] [--force]
+    [--entity=Order] [--usecase=PlaceOrder] [--register] [--dry-run] [--force] [--style=attributes|properties]
 ```
 
 The scripts can't reach the skill folder from inside a Sail container. Under Sail, either run them with host PHP, or copy them into the project and run them with `./vendor/bin/sail php`.

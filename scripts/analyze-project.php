@@ -126,7 +126,7 @@ $metrics['files_using_http_client'] = count($httpClientFiles);
 $ecosystemGroups = [
     'dev_env' => ['laravel/sail', 'laravel/octane'],
     'spatie' => array_values(array_filter(array_keys($packages), fn ($p) => str_starts_with($p, 'spatie/'))),
-    'first_party' => ['laravel/sanctum', 'laravel/passport', 'laravel/fortify', 'laravel/breeze', 'laravel/jetstream',
+    'first_party' => ['laravel/boost', 'laravel/mcp', 'laravel/sanctum', 'laravel/passport', 'laravel/fortify', 'laravel/breeze', 'laravel/jetstream',
         'laravel/horizon', 'laravel/scout', 'laravel/cashier', 'laravel/cashier-paddle', 'laravel/socialite',
         'laravel/reverb', 'laravel/pennant', 'laravel/telescope', 'laravel/pulse', 'laravel/folio', 'laravel/nova'],
     'ui' => ['livewire/livewire', 'livewire/volt', 'inertiajs/inertia-laravel', 'filament/filament', 'laravel/nova'],
@@ -295,10 +295,22 @@ if ($borderline && $detected['level'] === null) {
 }
 
 $laravelVersion = installedVersion($root, 'laravel/framework') ?? ($packages['laravel/framework'] ?? 'unknown');
+$laravelMajor = preg_match('/(\d+)/', (string) $laravelVersion, $vm) ? (int) $vm[1] : null;
+$modelStyle = ($laravelMajor ?? 0) >= 13 ? 'attributes' : 'properties';
+
+$boostBlockIn = [];
+foreach (['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md'] as $f) {
+    if (is_file("$root/$f") && str_contains((string) file_get_contents("$root/$f"), '<laravel-boost-guidelines>')) {
+        $boostBlockIn[] = $f;
+    }
+}
 
 $result = [
     'project_root' => $root,
     'laravel' => $laravelVersion,
+    'laravel_major' => $laravelMajor,
+    'model_style' => $modelStyle,
+    'boost' => ['installed' => $has('laravel/boost'), 'guideline_blocks_in' => $boostBlockIn],
     'php_constraint' => $composer['require']['php'] ?? 'unknown',
     'providers_file' => is_file("$root/bootstrap/providers.php") ? 'bootstrap/providers.php' : 'config/app.php',
     'dev_environment' => [
@@ -338,6 +350,11 @@ echo str_repeat('=', 60)."\n";
 echo "Project        : $root\n";
 echo "Laravel        : {$result['laravel']} (PHP {$result['php_constraint']})\n";
 echo "Providers file : {$result['providers_file']}\n";
+echo 'Model style    : '.($modelStyle === 'attributes'
+    ? 'attributes (#[Table], #[Fillable], #[UseFactory], #[UsePolicy] ... Laravel 13+)'
+    : 'properties ($table, $fillable, newFactory())')."\n";
+echo 'Laravel Boost  : '.($has('laravel/boost') ? 'installed' : 'not installed')
+    .($boostBlockIn ? '; Boost guideline block in '.implode(', ', $boostBlockIn).': record decisions OUTSIDE it' : '')."\n";
 echo 'Sail           : '.$yn($usesSail).($usesSail ? '  → run commands via ./vendor/bin/sail' : '')."\n";
 echo 'Octane         : '.$yn($has('laravel/octane'))."\n\n";
 

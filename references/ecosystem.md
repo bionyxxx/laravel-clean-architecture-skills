@@ -11,6 +11,8 @@ Read this file when a project uses (or is about to use) a package listed here, o
 6. Structure-overlapping packages (laravel-actions, laravel-modules, modular)
 7. Quality tooling (Pint, Larastan, Rector, Pest)
 8. Other common packages
+9. Laravel 13 PHP attributes: what to use in which layer
+10. Laravel Boost and the generated CLAUDE.md/AGENTS.md
 
 ## 1. Detection cheat-sheet
 
@@ -103,6 +105,7 @@ These are infra and ops only. Configure them in `config/` and schedule them in `
 
 | Package | Placement and rules |
 |---|---|
+| **Boost** (`laravel/boost`) | Dev-time MCP server and AI guidelines. Use its doc search for version-correct APIs. Keep your own notes outside its `CLAUDE.md`/`AGENTS.md` block (section 10). |
 | **Sanctum / Passport** | Auth guards and middleware at the edge (`auth:sanctum`). Business code receives `$request->user()->id` or an actor DTO, never the guard. |
 | **Fortify / Breeze / Jetstream** | They generate `app/Actions/Fortify` and `app/Actions/Jetstream`. Leave those as they are, since the packages own them. Your business Actions go elsewhere. Customise auth only through those action classes. |
 | **Horizon / queues** | Jobs and queued listeners: `app/Jobs` (L1), `Domain/*/Jobs` (L2), `Infrastructure/Jobs` (L3/L4). Jobs call Actions/UseCases. Set `$tries`, `$backoff`, `$timeout`, and `ShouldBeUnique` where duplicates hurt. Name queues by priority (`high`, `default`, `low`) in `config/horizon.php`. |
@@ -160,3 +163,54 @@ If it's installed, its classes **are** the Action/UseCase type:
 | `laravel-notification-channels/*`, `twilio/sdk` | Notifications are side effects, so trigger them from queued listeners. At L3/L4 SMS/WhatsApp go behind a `MessageSender` contract. |
 | `aws/aws-sdk-php`, `league/flysystem-*` | Use `Storage::disk()` in Infrastructure. Business code receives paths or URLs. |
 | Payment gateways (`midtrans/midtrans-php`, `xendit/xendit-php`, `stripe/stripe-php`) | Always behind a `PaymentGateway` contract from L2 up. Webhooks: verify signatures, deduplicate on the provider id, then call an idempotent UseCase. |
+
+## 9. Laravel 13 PHP attributes
+
+Laravel 13 (PHP 8.3+) configures many classes with PHP attributes instead of properties. The fresh skeleton's `User` model already uses `#[Fillable]` and `#[Hidden]`. **On Laravel 13+, prefer attributes in new code. Match the existing style when editing old classes. On Laravel 12 and older, use properties.** Check the version in `composer.lock` (`analyze-project.php` prints it and the recommended style).
+
+### Eloquent models (`Illuminate\Database\Eloquent\Attributes\*`)
+```php
+#[Table('orders')]                                   // also: key:, keyType:, incrementing:, timestamps:, dateFormat:
+#[Fillable(['customer_id', 'status', 'total'])]      // or #[Guarded([...])] / #[Unguarded]
+#[Hidden(['internal_note'])]                         // #[Visible], #[Appends]
+#[UseFactory(OrderFactory::class)]                   // replaces newFactory() for module models
+#[UsePolicy(OrderPolicy::class)]                     // replaces Gate::policy() for module models
+#[UseEloquentBuilder(OrderQueryBuilder::class)]      // replaces newEloquentBuilder()
+#[ObservedBy(OrderObserver::class)] #[ScopedBy(TenantScope::class)] #[CollectedBy(OrderCollection::class)]
+#[UseResource(OrderResource::class)]                 // $order->toResource()
+class Order extends Model { use HasFactory; }
+```
+Other attributes in that namespace: `#[Connection]`, `#[RouteKey]`, `#[Touches]`, `#[WithoutTimestamps]`, `#[WithoutIncrementing]`, `#[DateFormat]`.
+
+`#[UseFactory]` and `#[UsePolicy]` remove the two biggest pains of moving models out of `App\Models` (factory and policy discovery). Use them at L2 and L3.
+
+### Queue jobs and listeners (`Illuminate\Queue\Attributes\*`)
+`#[Tries(5)]`, `#[Backoff(10, 60, 300)]`, `#[Timeout(120)]`, `#[MaxExceptions(3)]`, `#[UniqueFor(3600)]`, `#[Queue('high')]`, `#[Connection('redis')]`, `#[Delay(30)]`, `#[RetryFor(...)]`, `#[FailOnTimeout]`, `#[DeleteWhenMissingModels]`, `#[WithoutRelations]`, `#[DebounceFor(...)]`.
+
+### Console commands (`Illuminate\Console\Attributes\*`)
+`#[Signature('orders:cancel-stale {--days=1}')]`, `#[Description('Cancel stale pending orders')]`, plus `#[Aliases]`, `#[Help]`, `#[Usage]`, `#[Hidden]`. The command stays in Presentation and calls an Action or UseCase.
+
+### Controllers (`Illuminate\Routing\Attributes\Controllers\*`)
+`#[Middleware('auth:sanctum')]` (class or method, with `only:`/`except:`), `#[WithoutMiddleware(...)]`, `#[Authorize('update', 'order')]`. Authorization at the edge is the right place in every level.
+
+### Form requests (`Illuminate\Foundation\Http\Attributes\*`)
+`#[StopOnFirstFailure]`, `#[FailOnUnknownFields]` (rejects unexpected input, which is good for API boundaries), `#[ErrorBag('checkout')]`, `#[RedirectTo('/checkout')]`, `#[RedirectToRoute('checkout')]`.
+
+### Container (`Illuminate\Container\Attributes\*`): layer rules matter
+- **Constructor injection** attributes like `#[Config('services.stripe.secret')]`, `#[Storage('s3')]`, `#[DB('reporting')]`, `#[Cache('redis')]`, `#[Log('payments')]` and `#[Context('tenant_id')]` are fine in **Infrastructure** adapters at every level, and in Actions at L1/L2.
+- **`#[CurrentUser]`, `#[Authenticated]`, `#[Auth]`, `#[RouteParameter]` and `#[RequestAttribute]`** read ambient request state, so they belong in Presentation only. Never use them in Actions, UseCases or the Domain (universal rule: pass the actor in).
+- **`#[Bind(Concrete::class)]`, `#[Singleton]` and `#[Scoped]` on an interface:**
+  - L1/L2: allowed (`#[Bind(StripePaymentGateway::class)] interface PaymentGateway`).
+  - **L3/L4: don't use them on Domain or Application contracts.** The attribute names the Infrastructure class, so the Domain would depend on Infrastructure. Keep `$bindings` in the module service provider. `#[Singleton]`/`#[Scoped]` on Infrastructure classes themselves are fine.
+  - Octane: prefer `#[Scoped]` over `#[Singleton]` for anything that holds per-request state.
+
+### Testing (`Illuminate\Foundation\Testing\Attributes\*`)
+`#[Seed]`, `#[Seeder(OrderSeeder::class)]`, `#[SetUp]`/`#[TearDown]` hooks, `#[WithoutMigrationEvents]` and `#[UnitTest]` (PHPUnit test classes).
+
+## 10. Laravel Boost and the generated CLAUDE.md/AGENTS.md
+
+- New Laravel 13 apps ship with `CLAUDE.md` and `AGENTS.md` containing a `<laravel-boost-guidelines>` … `</laravel-boost-guidelines>` block. `php artisan boost:install` and `boost:update` **rewrite everything inside that block.**
+- **Write the architecture decision (and any other project notes) outside the block**, below the closing tag, for example in a `## Architecture` section. Otherwise the next Boost update erases it. The analyzer reports which files contain the block.
+- The bootstrap block tells agents to `composer require laravel/boost --dev`. Per this skill's rule, **ask the user first** instead of installing it silently. Under Sail: `./vendor/bin/sail composer require laravel/boost --dev && ./vendor/bin/sail artisan boost:install`.
+- When Boost is installed (`laravel/boost`), its MCP server offers tools such as version-specific documentation search, `tinker`, database schema and queries, routes, and last errors. Use them to confirm framework APIs for the project's exact versions. The Boost guidelines cover framework conventions. This skill adds the architecture level on top. If they conflict, follow the level the project chose and mention the conflict.
+

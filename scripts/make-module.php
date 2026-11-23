@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Usage (from the Laravel project root):
  *   php make-module.php <Module> [--level=1|2|3|4] [--entity=Name] [--usecase=CreateName]
  *                       [--base=app/Modules] [--namespace=App\\Modules] [--root=.]
- *                       [--register] [--force] [--no-detect] [--dry-run]
+ *                       [--register] [--force] [--no-detect] [--dry-run] [--style=attributes|properties]
  *
  * --level      Architecture level. Defaults to the level recorded in CLAUDE.md, else the detected structure.
  * --entity     Main entity/model name (default: the module name).
@@ -18,12 +18,14 @@ declare(strict_types=1);
  * --force      Overwrite existing files (default: skip them).
  * --no-detect  Ignore composer.json (plain DTOs, plain actions, PHPUnit tests, `php` command prefix).
  * --dry-run    Only print what would be written.
+ * --style      Model configuration style. Default: `attributes` (#[Table], #[Fillable], #[UseFactory])
+ *              on Laravel 13+, `properties` ($table, $fillable, newFactory()) on older versions.
  */
 
 // ------------------------------------------------------------------ CLI parsing
 
 $opts = ['level' => null, 'entity' => null, 'usecase' => null, 'base' => 'app/Modules', 'namespace' => 'App\\Modules',
-    'root' => getcwd(), 'register' => false, 'force' => false, 'no-detect' => false, 'dry-run' => false, 'help' => false];
+    'root' => getcwd(), 'style' => null, 'register' => false, 'force' => false, 'no-detect' => false, 'dry-run' => false, 'help' => false];
 $positional = [];
 foreach (array_slice($argv, 1) as $arg) {
     if (preg_match('/^--([a-z-]+)(?:=(.*))?$/', $arg, $m)) {
@@ -89,6 +91,28 @@ $pint = $sail ? './vendor/bin/sail pint --dirty' : './vendor/bin/pint --dirty';
 $laravelData = $has('spatie/laravel-data');
 $laravelActions = $has('lorisleiva/laravel-actions');
 $pest = $has('pestphp/pest');
+
+// Laravel major version: composer.lock first (installed), then the composer.json constraint.
+$laravelMajor = null;
+if (is_file("$root/composer.lock")) {
+    $lock = json_decode((string) file_get_contents("$root/composer.lock"), true) ?: [];
+    foreach ($lock['packages'] ?? [] as $p) {
+        if (($p['name'] ?? null) === 'laravel/framework' && preg_match('/(\d+)\./', (string) $p['version'], $m)) {
+            $laravelMajor = (int) $m[1];
+        }
+    }
+}
+if ($laravelMajor === null && preg_match('/(\d+)/', (string) ($composer['require']['laravel/framework'] ?? ''), $m)) {
+    $laravelMajor = (int) $m[1];
+}
+$style = $opts['style'] ?: (($laravelMajor ?? 0) >= 13 ? 'attributes' : 'properties');
+if (! in_array($style, ['attributes', 'properties'], true)) {
+    fail('--style must be "attributes" or "properties".');
+}
+if ($style === 'attributes' && $laravelMajor !== null && $laravelMajor < 13) {
+    fail("--style=attributes needs Laravel 13+ (detected $laravelMajor).");
+}
+$attrs = $style === 'attributes';
 
 $pestGlobalRefresh = false;
 if ($pest && is_file("$root/tests/Pest.php")) {
@@ -184,7 +208,28 @@ function tpl(string $template, array $extra = []): string
 
 // ------------------------------------------------------------------ shared templates
 
-$tplModel = <<<'PHP'
+$tplModel = $attrs ? <<<'PHP'
+<?php
+
+namespace {{ns}};
+
+use {{factoryFqcn}};
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+#[Table('{{table}}')]
+#[Fillable(['name'])]
+#[UseFactory({{factoryClass}}::class)]
+class {{Entity}} extends Model
+{
+    /** @use HasFactory<{{factoryClass}}> */
+    use HasFactory;
+}
+
+PHP : <<<'PHP'
 <?php
 
 namespace {{ns}};
@@ -331,10 +376,11 @@ $tplResource = <<<'PHP'
 
 namespace {{ns}};
 
+use {{modelFqcn}};
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \{{modelFqcn}} */
+/** @mixin {{Entity}} */
 final class {{Entity}}Resource extends JsonResource
 {
     public function toArray(Request $request): array
@@ -474,7 +520,7 @@ final class {{UseCase}}Test extends TestCase
 
 PHP;
 
-$pestUses = $pestGlobalRefresh ? '' : "\nuses(Illuminate\\Foundation\\Testing\\RefreshDatabase::class);\n";
+$pestUses = $pestGlobalRefresh ? '' : "\nuse Illuminate\\Foundation\\Testing\\RefreshDatabase;\n\nuses(RefreshDatabase::class);\n";
 
 // ------------------------------------------------------------------ build file map
 
@@ -482,6 +528,7 @@ $pestUses = $pestGlobalRefresh ? '' : "\nuses(Illuminate\\Foundation\\Testing\\R
 $files = [];
 $providers = [];
 $routeSnippet = null;
+$routeController = null;
 $notes = [];
 
 $migrationExists = (bool) glob("$root/database/migrations/*_create_{$table}_table.php");
@@ -509,7 +556,10 @@ if ($level === 1) {
             '{{eventFqcn}}' => "App\\Events\\{$entity}Created", '{{modelFqcn}}' => $modelFqcn]),
         "app/Http/Requests/$entity/Store{$entity}Request.php" => tpl($tplRequest, ['{{ns}}' => "App\\Http\\Requests\\$entity"]),
         "app/Http/Resources/{$entity}Resource.php" => tpl($tplResource, ['{{ns}}' => 'App\\Http\\Resources', '{{modelFqcn}}' => $modelFqcn]),
-        "app/Http/Controllers/{$entity}Controller.php" => tpl(strtr($tplControllerAction, ['{{dtoFromRequest}}' => $dtoFromRequest]), [
+        "app/Http/Controllers/{$entity}Controller.php" => tpl(strtr($tplControllerAction, [
+            '{{dtoFromRequest}}' => $dtoFromRequest,
+            "use App\\Http\\Controllers\\Controller;\n" => '', // same namespace: no import needed
+        ]), [
             '{{ns}}' => 'App\\Http\\Controllers', '{{actionFqcn}}' => "App\\Actions\\$entity\\{$useCase}Action",
             '{{actionClass}}' => "{$useCase}Action", '{{dtoFqcn}}' => "App\\Data\\{$entity}Data",
             '{{requestFqcn}}' => "App\\Http\\Requests\\$entity\\Store{$entity}Request",
@@ -521,7 +571,8 @@ if ($level === 1) {
     }
     $files += $f;
     $files += $featureTest($pest ? '' : "Tests\\Feature\\$entity", "tests/Feature/$entity", $routePrefixL12);
-    $routeSnippet = "Route::post('/$uri', [\\App\\Http\\Controllers\\{$entity}Controller::class, 'store'])->name('$uri.store');";
+    $routeController = "App\\Http\\Controllers\\{$entity}Controller";
+    $routeSnippet = "Route::post('/$uri', [{$entity}Controller::class, 'store'])->name('$uri.store');";
 }
 
 if ($level === 2) {
@@ -570,7 +621,8 @@ PHP;
     }
     $providers[] = 'App\\Providers\\DomainServiceProvider';
     $files += $featureTest($pest ? '' : "Tests\\Feature\\Domain\\$module", "tests/Feature/Domain/$module", $routePrefixL12);
-    $routeSnippet = "Route::post('/$uri', [\\App\\Http\\Controllers\\$module\\{$entity}Controller::class, 'store'])->name('$uri.store');";
+    $routeController = "App\\Http\\Controllers\\$module\\{$entity}Controller";
+    $routeSnippet = "Route::post('/$uri', [{$entity}Controller::class, 'store'])->name('$uri.store');";
 }
 
 if ($level === 3) {
@@ -868,7 +920,7 @@ final class SystemClock implements Clock
 {
     public function now(): DateTimeImmutable
     {
-        return new DateTimeImmutable();
+        return new DateTimeImmutable;
     }
 }
 
@@ -1011,13 +1063,14 @@ PHP),
 namespace {{ModNs}}\Domain\Repositories;
 
 use {{ModNs}}\Domain\Entities\{{Entity}};
+use {{ModNs}}\Domain\Exceptions\{{Entity}}NotFound;
 use {{ModNs}}\Domain\ValueObjects\{{Entity}}Id;
 
 interface {{Entity}}Repository
 {
     public function nextIdentity(): {{Entity}}Id;
 
-    /** @throws \{{ModNs}}\Domain\Exceptions\{{Entity}}NotFound */
+    /** @throws {{Entity}}NotFound */
     public function get({{Entity}}Id $id): {{Entity}};
 
     public function save({{Entity}} ${{entity}}): void;
@@ -1099,24 +1152,24 @@ PHP, $sv),
 
 namespace {{ModNs}}\Infrastructure\Persistence;
 
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
+{{modelAttrImports}}use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 
-final class {{Entity}}Model extends Model
+{{modelAttrs}}final class {{Entity}}Model extends Model
 {
     use HasUuids;
-
-    protected $table = '{{table}}';
-
-    protected $fillable = ['id', 'name', 'created_at'];
-
+{{modelProps}}
     protected function casts(): array
     {
         return ['created_at' => 'immutable_datetime', 'updated_at' => 'immutable_datetime'];
     }
 }
 
-PHP),
+PHP, $attrs
+            ? ['{{modelAttrImports}}' => "use Illuminate\\Database\\Eloquent\\Attributes\\Fillable;\nuse Illuminate\\Database\\Eloquent\\Attributes\\Table;\n",
+                '{{modelAttrs}}' => "#[Table('$table')]\n#[Fillable(['id', 'name', 'created_at'])]\n", '{{modelProps}}' => '']
+            : ['{{modelAttrImports}}' => '', '{{modelAttrs}}' => '',
+                '{{modelProps}}' => "\n    protected \$table = '$table';\n\n    protected \$fillable = ['id', 'name', 'created_at'];\n"]),
         "$modPath/Infrastructure/Persistence/{$entity}Mapper.php" => tpl(<<<'PHP'
 <?php
 
@@ -1372,6 +1425,41 @@ if ($migrationExists) {
     $files[$migrationPath] = tpl($tplMigration, ['{{idColumn}}' => $level === 4 ? "\$table->uuid('id')->primary();" : '$table->id();']);
 }
 
+// ------------------------------------------------------------------ code style helpers (Pint-compatible)
+
+/** Sort the top-level `use` block alphabetically, the way Pint's ordered_imports does. */
+function sortImports(string $code): string
+{
+    return (string) preg_replace_callback('/^(?:use [^\n]+;\n)+/m', function (array $m): string {
+        $lines = array_values(array_unique(array_filter(explode("\n", $m[0]))));
+        usort($lines, fn ($a, $b) => strcasecmp(str_replace('\\', ' ', $a), str_replace('\\', ' ', $b)));
+
+        return implode("\n", $lines)."\n";
+    }, $code, 1);
+}
+
+/**
+ * Import $fqcn into a namespace-less PHP file (providers.php, routes) and return [code, name to use].
+ * Falls back to the fully qualified name when the short name is already taken by another class.
+ */
+function addImport(string $code, string $fqcn): array
+{
+    $short = substr($fqcn, (int) strrpos($fqcn, '\\') + 1);
+    if (preg_match('/^use '.preg_quote($fqcn, '/').';$/m', $code)) {
+        return [$code, $short];
+    }
+    if (preg_match('/^use [^;]*\\\\'.preg_quote($short, '/').';$/m', $code)) {
+        return [$code, '\\'.$fqcn];
+    }
+    if (preg_match('/^use [^\n]+;\n/m', $code)) {
+        $code = (string) preg_replace('/^(use [^\n]+;\n)/m', "use $fqcn;\n$1", $code, 1);
+    } else {
+        $code = (string) preg_replace('/^<\?php\s*\n/', "<?php\n\nuse $fqcn;\n\n", $code, 1);
+    }
+
+    return [sortImports($code), $short];
+}
+
 // ------------------------------------------------------------------ write
 
 $created = $skipped = [];
@@ -1385,7 +1473,7 @@ foreach ($files as $rel => $contents) {
         if (! is_dir(dirname($abs)) && ! mkdir(dirname($abs), 0775, true) && ! is_dir(dirname($abs))) {
             fail('Cannot create directory '.dirname($abs));
         }
-        file_put_contents($abs, $contents);
+        file_put_contents($abs, str_ends_with($rel, '.php') ? sortImports($contents) : $contents);
     }
     $created[] = $rel;
 }
@@ -1396,8 +1484,12 @@ if ($opts['register'] && ! $opts['dry-run']) {
     if (is_file($providersFile) && $providers) {
         $src = (string) file_get_contents($providersFile);
         foreach ($providers as $p) {
-            if (! str_contains($src, $p.'::class')) {
-                $src = (string) preg_replace_callback('/\n\];\s*$/', fn () => "\n    $p::class,\n];\n", $src, 1, $count);
+            $short = substr($p, (int) strrpos($p, '\\') + 1);
+            $alreadyListed = str_contains($src, $p.'::class')
+                || (preg_match('/^use '.preg_quote($p, '/').';$/m', $src) && str_contains($src, "$short::class"));
+            if (! $alreadyListed) {
+                [$src, $name] = addImport($src, $p);
+                $src = (string) preg_replace_callback('/\n\];\s*$/', fn () => "\n    $name::class,\n];\n", $src, 1, $count);
                 if ($count) {
                     $registered[] = "bootstrap/providers.php ← $p";
                 }
@@ -1407,8 +1499,10 @@ if ($opts['register'] && ! $opts['dry-run']) {
     }
     if ($routeSnippet && is_file("$root/$routesTarget")) {
         $src = (string) file_get_contents("$root/$routesTarget");
-        if (! str_contains($src, $routeSnippet)) {
-            file_put_contents("$root/$routesTarget", rtrim($src)."\n\n$routeSnippet\n");
+        if (! str_contains($src, "'/$uri'")) {
+            [$src, $name] = addImport($src, $routeController);
+            $line = str_replace("[{$entity}Controller::class", "[$name::class", $routeSnippet);
+            file_put_contents("$root/$routesTarget", rtrim($src)."\n\n$line\n");
             $registered[] = "$routesTarget ← POST /$uri";
         }
     }
@@ -1421,7 +1515,8 @@ echo ($opts['dry-run'] ? '[dry-run] ' : '')."{$levelNames[$level]} scaffold for 
 echo 'Detected: '.implode(', ', array_filter([
     $sail ? 'Sail' : null, $laravelData ? 'spatie/laravel-data' : null,
     $laravelActions ? 'lorisleiva/laravel-actions' : null, $pest ? 'Pest' : 'PHPUnit',
-]))."\n\n";
+]))."\n";
+echo 'Laravel: '.($laravelMajor ?? 'unknown').", model style: $style\n\n";
 echo 'Created ('.count($created)."):\n";
 foreach ($created as $f) {
     echo "  + $f\n";
@@ -1451,7 +1546,7 @@ if ($providers && ! $opts['register']) {
     }
 }
 if ($routeSnippet && ! $opts['register']) {
-    echo '  '.$step++.". Add to $routesTarget:\n       $routeSnippet\n";
+    echo '  '.$step++.". Add to $routesTarget:\n       use $routeController;\n       $routeSnippet\n";
 }
 if ($routesTarget === 'routes/web.php' && $level <= 2) {
     echo '  '.$step++.". No routes/api.php: the route goes to web.php. For an API run `$artisan install:api` first.\n";

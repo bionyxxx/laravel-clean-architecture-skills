@@ -43,6 +43,7 @@ app/
 - Actions may call other Actions. Watch for deep chains (more than 2 levels): that's a signal to move up to L2.
 - Eloquent use inside Actions is fine. Put complex reusable queries in model scopes or a dedicated `Queries/` class.
 - Controllers stay under about 15 lines per method.
+- **Laravel 13+:** configure models, jobs, commands and controllers with attributes (`#[Fillable]`, `#[Tries]`, `#[Signature]`, `#[Middleware]`, …), and use properties on ≤ 12. At L1 it's fine to put `#[Bind(StripeClient::class)]` on a service interface. See `ecosystem.md` §9.
 
 ## Templates
 

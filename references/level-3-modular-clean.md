@@ -164,12 +164,18 @@ namespace App\Modules\Order\Domain\Models;
 
 use App\Modules\Order\Domain\Enums\OrderStatus;
 use App\Modules\Order\Domain\Exceptions\OrderCannotBeCancelled;
+use Database\Factories\Order\OrderFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[Fillable(['number', 'customer_id', 'status', 'total', 'charge_id', 'cancel_reason'])]
+#[UseFactory(OrderFactory::class)]      // Laravel 13+; ≤ 12: $fillable + newFactory()
 final class Order extends Model
 {
-    protected $guarded = [];
+    use HasFactory;
 
     protected function casts(): array
     {
@@ -424,6 +430,8 @@ final class OrderServiceProvider extends ServiceProvider
     }
 }
 ```
+
+**Keep bindings in the provider, not on the contract.** Laravel 12+/13 lets you write `#[Bind(EloquentOrderRepository::class)]` on an interface. At L3 that would make `Domain\Contracts` import an Infrastructure class and break the dependency rule (the arch test catches it). Attributes on the Infrastructure side are fine: `#[Singleton]`/`#[Scoped]` on a gateway, `#[Config('services.stripe.secret')]` in its constructor.
 
 Register each module provider in `bootstrap/providers.php` (Laravel 11+):
 ```php
